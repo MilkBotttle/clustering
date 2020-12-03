@@ -1,0 +1,82 @@
+- name: Prepare the clustering
+  hosts: all
+  get_facts: no
+  tasks:
+    - copy:
+        dest: "{{ lookup('config', 'DEFAULT_LOG_PATH') }}/state"
+        content: |
+          {"state":"PREPARE"}
+      delegate_to: localhost
+    - name: Ensure Docker is running
+      systemd:
+        name: docker
+        state: started
+
+- name: Init Master[0]
+  hosts: master[0]
+  gather_facts: no
+  tags: create
+  tasks:
+    - copy:
+        dest: "{{ lookup('config', 'DEFAULT_LOG_PATH') }}/state"
+        content: |
+          {"state":"INITNIAL"}
+      delegate_to: localhost
+
+    - name: Init a new swarm.
+      docker_swarm:
+        state: present
+      register: init_info
+
+    - name: Register init info
+      set_fact:
+        manager_join_token: "{{ init_info.swarm_facts.JoinTokens.Manager }}"
+        worker_join_token: "{{ init_info.swarm_facts.JoinTokens.Worker }}"
+        mastr_ip: "{{ ansible_eth0.ipv4.address }}"
+    - name: Save init info
+      copy:
+        dest: "{{ lookup('config', 'DEFAULT_LOG_PATH') }}/cluster_info"
+        content: |
+          {"manager_join_token": "{{ manager_join_token }}",
+          "worker_join_token": "{{ worker_join_token }}",
+          "mastr_ip": "{{ mastr_ip }}"
+          }
+
+- name: MasterJoin
+  hosts: masters[1:]
+  gather_facts: no
+  tags: create, update
+  tasks:
+    - copy:
+        dest: "{{ state_log_path }}"
+        content: |
+          {"state":"MASTERJOIN"}
+      delegate_to: localhost
+
+    - name: Master join
+      docker_swarm:
+        state: join
+        advertise_addr: "eth0:4567"
+        join_token: "{{ hostvars[master[0]]['manager_join_token'] }}"
+        remote_addrs: "{{ hostvars[master[0]]['mastr_ip'] }}"
+        register: err
+
+- name: WorkerJoin
+  hosts: workers
+  gather_facts: no
+  tags: create, update
+  tasks:
+    - copy:
+        dest: "{{ state_log_path }}"
+        content: |
+          {"state":"WORKERJOIN"}
+      delegate_to: localhost
+
+    - name: Worker join
+      docker_swarm:
+        state: join
+        advertise_addr: "eth0:4567"
+        join_token: "{{ hostvars[master[0]]['worker_join_token'] }}"
+        remote_addrs: "{{ hostvars[master[0]]['mastr_ip'] }}"
+        register: err
+

@@ -1,0 +1,12 @@
+- hosts: all
+#  connection: local
+  gather_facts: no
+  tasks:
+    - debug: msg="{{ lookup('config','DEFAULT_LOG_PATH') }}"
+
+    - name: test write file
+      copy:
+        dest: /tmp/test_write
+        content: |
+          {"state": "INITNIAL"}
+      delegate_to: localhost
